@@ -4,6 +4,9 @@ import os.path as osp
 import time
 import cv2
 import torch
+import sys
+
+sys.path.insert(0, '/root/ByteTrack')
 
 from loguru import logger
 
@@ -180,7 +183,14 @@ def image_demo(predictor, vis_folder, current_time, args):
         files = get_image_list(args.path)
     else:
         files = [args.path]
-    files.sort()
+
+    # @heesang edit file_path for alchera
+    files = filter(lambda x: True if x.split('_')[-2]=='005' else False, files)
+    files = sorted(files, key=lambda x:x.split('_')[-1])
+    
+    # @ original code
+    # files.sort()
+    
     tracker = BYTETracker(args, frame_rate=args.fps)
     timer = Timer()
     results = []

@@ -48,7 +48,22 @@ def get_color(idx):
 
     return color
 
-
+def bestshot_tracking(image, bestshot):
+    im = np.ascontiguousarray(np.copy(image))
+    filenames = []
+    bestshots = []
+    
+    for tid, info in bestshot.items():
+        filenames.append(f'{tid}.jpg')
+        tlx,tly,w,h = int(info['bbox'][0]), int(info['bbox'][1]), int(info['bbox'][2]), int(info['bbox'][3])
+        img = image[tly:tly+h, tlx:tlx+w, ...]
+        if not img.size:
+            continue
+        bestshots.append(img)
+    
+    return filenames, bestshots
+        
+    
 def plot_tracking(image, tlwhs, obj_ids, scores=None, frame_id=0, fps=0., ids2=None):
     im = np.ascontiguousarray(np.copy(image))
     im_h, im_w = im.shape[:2]

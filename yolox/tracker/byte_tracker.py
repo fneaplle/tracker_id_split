@@ -15,7 +15,7 @@ class STrack(BaseTrack):
     def __init__(self, tlwh, score):
 
         # wait activate
-        self._tlwh = np.asarray(tlwh, dtype=np.float)
+        self._tlwh = np.asarray(tlwh, dtype=np.float32)
         self.kalman_filter = None
         self.mean, self.covariance = None, None
         self.is_activated = False
@@ -55,7 +55,7 @@ class STrack(BaseTrack):
         # self.is_activated = True
         self.frame_id = frame_id
         self.start_frame = frame_id
-
+ 
     def re_activate(self, new_track, frame_id, new_id=False):
         self.mean, self.covariance = self.kalman_filter.update(
             self.mean, self.covariance, self.tlwh_to_xyah(new_track.tlwh)
@@ -178,12 +178,13 @@ class BYTETracker(object):
         inds_low = scores > 0.1
         inds_high = scores < self.args.track_thresh
 
+        '''Detection high score'''
         inds_second = np.logical_and(inds_low, inds_high)
         dets_second = bboxes[inds_second]
         dets = bboxes[remain_inds]
         scores_keep = scores[remain_inds]
         scores_second = scores[inds_second]
-
+        
         if len(dets) > 0:
             '''Detections'''
             detections = [STrack(STrack.tlbr_to_tlwh(tlbr), s) for
@@ -192,18 +193,42 @@ class BYTETracker(object):
             detections = []
 
         ''' Add newly detected tracklets to tracked_stracks'''
+        tracked_stracks = []
         unconfirmed = []
-        tracked_stracks = []  # type: list[STrack]
         for track in self.tracked_stracks:
-            if not track.is_activated:
+            if not track.is_activated: # activated는 confirmed 된거임
                 unconfirmed.append(track)
             else:
-                tracked_stracks.append(track)
-
+                tracked_stracks.append(track)               
+        
         ''' Step 2: First association, with high score detection boxes'''
-        strack_pool = joint_stracks(tracked_stracks, self.lost_stracks)
+        strack_pool = joint_stracks(tracked_stracks, self.lost_stracks)       
+        
         # Predict the current location with KF
         STrack.multi_predict(strack_pool)
+        
+        # @heesang start
+        first_pool = [s for s in strack_pool if s.score>0.6]
+        second_pool = sub_stracks(strack_pool, first_pool)
+        
+        dists = matching.iou_distance(first_pool, detections)
+        matches, u_track, u_detection = matching.linear_assignment(dists, thresh=self.args.match_thresh)
+        
+        for itracked, idet in matches:
+            track = first_pool[itracked]
+            det = detections[idet]
+            if track.state == TrackState.Tracked:
+                track.update(detections[idet], self.frame_id)
+                activated_starcks.append(track)
+            else:
+                track.re_activate(det, self.frame_id, new_id=False)
+                refind_stracks.append(track)
+        
+        tmp = [first_pool[i] for i in u_track]
+        strack_pool = joint_stracks(second_pool, tmp)
+        detections = [detections[i] for i in u_detection]
+        # @heesang end
+        
         dists = matching.iou_distance(strack_pool, detections)
         if not self.args.mot20:
             dists = matching.fuse_score(dists, detections)
@@ -234,7 +259,7 @@ class BYTETracker(object):
             track = r_tracked_stracks[itracked]
             det = detections_second[idet]
             if track.state == TrackState.Tracked:
-                track.update(det, self.frame_id)
+                track.update(det, self.frame_id) # score 변화, is_activate True, kalman state 변경
                 activated_starcks.append(track)
             else:
                 track.re_activate(det, self.frame_id, new_id=False)
@@ -246,7 +271,7 @@ class BYTETracker(object):
                 track.mark_lost()
                 lost_stracks.append(track)
 
-        '''Deal with unconfirmed tracks, usually tracks with only one beginning frame'''
+        '''Deal with unconfirmed tracks, usually tracks with only one beginning frame''' # unconfirmed는 track으로 만들어지고 나서, 아직 일정 시간 이상 match가 안된거야.
         detections = [detections[i] for i in u_detection]
         dists = matching.iou_distance(unconfirmed, detections)
         if not self.args.mot20:
@@ -255,7 +280,7 @@ class BYTETracker(object):
         for itracked, idet in matches:
             unconfirmed[itracked].update(detections[idet], self.frame_id)
             activated_starcks.append(unconfirmed[itracked])
-        for it in u_unconfirmed:
+        for it in u_unconfirmed: # confirmed가 되지 않은 track이 match가 되지 않으면 바로 remove
             track = unconfirmed[it]
             track.mark_removed()
             removed_stracks.append(track)
@@ -268,7 +293,7 @@ class BYTETracker(object):
             track.activate(self.kalman_filter, self.frame_id)
             activated_starcks.append(track)
         """ Step 5: Update state"""
-        for track in self.lost_stracks:
+        for track in self.lost_stracks: # lost_track의 경우, 한번은 match된거니까 일정 시간 이상 시간을 주고 remove
             if self.frame_id - track.end_frame > self.max_time_lost:
                 track.mark_removed()
                 removed_stracks.append(track)
