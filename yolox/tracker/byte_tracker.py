@@ -207,11 +207,11 @@ class BYTETracker(object):
         # Predict the current location with KF
         STrack.multi_predict(strack_pool)
                
-        iou_dists = matching.iou_distance(strack_pool, detections)
-        dists = matching.gate_cost_matrix(self.kalman_filter, iou_dists, strack_pool, detections)
-        
+        iou_dists = matching.iou_distance(strack_pool, detections)        
         if not self.args.mot20:
-            dists = matching.fuse_score(dists, detections)
+            dists = matching.fuse_score(iou_dists, detections)
+        dists = matching.gate_cost_matrix(self.kalman_filter, dists, strack_pool, detections)
+        
         matches, u_track, u_detection = matching.linear_assignment(dists, thresh=self.args.match_thresh)
 
         for itracked, idet in matches:
@@ -236,6 +236,7 @@ class BYTETracker(object):
         
         iou_dists = matching.iou_distance(r_tracked_stracks, detections_second)
         dists = matching.gate_cost_matrix(self.kalman_filter, iou_dists, r_tracked_stracks, detections_second)
+        
         matches, u_track, u_detection_second = matching.linear_assignment(dists, thresh=0.5)
         for itracked, idet in matches:
             track = r_tracked_stracks[itracked]
@@ -256,9 +257,10 @@ class BYTETracker(object):
         '''Deal with unconfirmed tracks, usually tracks with only one beginning frame''' # unconfirmed는 track으로 만들어지고 나서, 아직 일정 시간 이상 match가 안된거야.
         detections = [detections[i] for i in u_detection]
         iou_dists = matching.iou_distance(unconfirmed, detections)
-        dists = matching.gate_cost_matrix(self.kalman_filter, iou_dists, unconfirmed, detections)
         if not self.args.mot20:
-            dists = matching.fuse_score(dists, detections)
+            dists = matching.fuse_score(iou_dists, detections)
+        dists = matching.gate_cost_matrix(self.kalman_filter, dists, unconfirmed, detections)
+        
         matches, u_unconfirmed, u_detection = matching.linear_assignment(dists, thresh=0.7)
         for itracked, idet in matches:
             unconfirmed[itracked].update(detections[idet], self.frame_id)
