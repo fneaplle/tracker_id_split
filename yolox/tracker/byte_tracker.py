@@ -84,7 +84,6 @@ class STrack(BaseTrack):
             self.mean, self.covariance, self.tlwh_to_xyah(new_tlwh))
         self.state = TrackState.Tracked
         self.is_activated = True
-
         self.score = new_track.score
 
     @property
@@ -174,7 +173,7 @@ class BYTETracker(object):
         scale = min(img_size[0] / float(img_h), img_size[1] / float(img_w))
         bboxes /= scale
 
-        remain_inds = scores > self.args.track_thresh
+        remain_inds = scores >= self.args.track_thresh
         inds_low = scores > 0.1
         inds_high = scores < self.args.track_thresh
 
@@ -207,9 +206,9 @@ class BYTETracker(object):
         # Predict the current location with KF
         STrack.multi_predict(strack_pool)
                
-        iou_dists = matching.iou_distance(strack_pool, detections)        
+        dists = matching.iou_distance(strack_pool, detections)        
         if not self.args.mot20:
-            dists = matching.fuse_score(iou_dists, detections)
+            dists = matching.fuse_score(dists, detections)
         dists = matching.gate_cost_matrix(self.kalman_filter, dists, strack_pool, detections)
         
         matches, u_track, u_detection = matching.linear_assignment(dists, thresh=self.args.match_thresh)
@@ -226,6 +225,7 @@ class BYTETracker(object):
 
         ''' Step 3: Second association, with low score detection boxes'''
         # association the untrack to the low score detections
+        
         if len(dets_second) > 0:
             '''Detections'''
             detections_second = [STrack(STrack.tlbr_to_tlwh(tlbr), s) for
@@ -234,8 +234,8 @@ class BYTETracker(object):
             detections_second = []
         r_tracked_stracks = [strack_pool[i] for i in u_track if strack_pool[i].state == TrackState.Tracked]
         
-        iou_dists = matching.iou_distance(r_tracked_stracks, detections_second)
-        dists = matching.gate_cost_matrix(self.kalman_filter, iou_dists, r_tracked_stracks, detections_second)
+        dists = matching.iou_distance(r_tracked_stracks, detections_second)
+        # dists = matching.gate_cost_matrix(self.kalman_filter, dists, r_tracked_stracks, detections_second)
         
         matches, u_track, u_detection_second = matching.linear_assignment(dists, thresh=0.5)
         for itracked, idet in matches:
@@ -256,9 +256,9 @@ class BYTETracker(object):
 
         '''Deal with unconfirmed tracks, usually tracks with only one beginning frame''' # unconfirmed는 track으로 만들어지고 나서, 아직 일정 시간 이상 match가 안된거야.
         detections = [detections[i] for i in u_detection]
-        iou_dists = matching.iou_distance(unconfirmed, detections)
+        dists = matching.iou_distance(unconfirmed, detections)
         if not self.args.mot20:
-            dists = matching.fuse_score(iou_dists, detections)
+            dists = matching.fuse_score(dists, detections)
         dists = matching.gate_cost_matrix(self.kalman_filter, dists, unconfirmed, detections)
         
         matches, u_unconfirmed, u_detection = matching.linear_assignment(dists, thresh=0.7)
