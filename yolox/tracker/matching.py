@@ -47,8 +47,9 @@ def linear_assignment(cost_matrix, thresh):
     unmatched_a = np.where(x < 0)[0]
     unmatched_b = np.where(y < 0)[0]
     matches = np.asarray(matches)
-    return matches, unmatched_a, unmatched_b
-
+    return matches, unmatched_a, unmatched_b  
+    
+    
 def ious(atlbrs, btlbrs):
     """
     Compute cost based on IoU
@@ -127,7 +128,6 @@ def embedding_distance(tracks, detections, metric='cosine'):
     cost_matrix = np.maximum(0.0, cdist(track_features, det_features, metric))  # Nomalized features
     return cost_matrix
 
-
 def gate_cost_matrix(kf, cost_matrix, tracks, detections, only_position=False):
     if cost_matrix.size == 0:
         return cost_matrix
@@ -139,7 +139,6 @@ def gate_cost_matrix(kf, cost_matrix, tracks, detections, only_position=False):
             track.mean, track.covariance, measurements, only_position)
         cost_matrix[row, gating_distance > gating_threshold] = np.inf
     return cost_matrix
-
 
 def fuse_motion(kf, cost_matrix, tracks, detections, only_position=False, lambda_=0.98):
     if cost_matrix.size == 0:
@@ -154,6 +153,32 @@ def fuse_motion(kf, cost_matrix, tracks, detections, only_position=False, lambda
         cost_matrix[row] = lambda_ * cost_matrix[row] + (1 - lambda_) * gating_distance
     return cost_matrix
 
+def fuse_motion_(kf, cost_matrix, tracks, detections, only_position=False, lambda_=0.98):
+    occlude_indices = [] # @heesang
+    if cost_matrix.size == 0:
+        return cost_matrix, occlude_indices
+    
+    gating_dim = 2 if only_position else 4
+    gating_threshold = kalman_filter.chi2inv95[gating_dim]
+    measurements = np.asarray([det.to_xyah() for det in detections])
+    
+    gating_mask = np.zeros_like(cost_matrix)
+    for row, track in enumerate(tracks):
+        gating_distance = kf.gating_distance(
+            track.mean, track.covariance, measurements, only_position, metric='maha')
+        gating_mask[row] = gating_distance
+        cost_matrix[row, gating_distance > gating_threshold] = np.inf
+        
+    for col in range(len(gating_mask[0])):
+        mask_indices = np.where(gating_mask[:, col]<0.297)[0]
+        if len(mask_indices)>=2:
+            # @heesang
+            for i in mask_indices:
+                occlude_indices.append(i)
+            print([tracks[i].track_id for i in mask_indices])
+            cost_matrix[mask_indices, col] = np.inf
+    
+    return cost_matrix, occlude_indices # @heesang
 
 def fuse_iou(cost_matrix, tracks, detections):
     if cost_matrix.size == 0:
@@ -169,12 +194,14 @@ def fuse_iou(cost_matrix, tracks, detections):
     return fuse_cost
 
 
-def fuse_score(cost_matrix, detections):
+def fuse_score(cost_matrix, detections, lambda_=0.98):
     if cost_matrix.size == 0:
         return cost_matrix
     iou_sim = 1 - cost_matrix
     det_scores = np.array([det.score for det in detections])
     det_scores = np.expand_dims(det_scores, axis=0).repeat(cost_matrix.shape[0], axis=0)
-    fuse_sim = iou_sim*det_scores
+    # orin code
+    # fuse_sim = iou_sim*det_scores
+    fuse_sim = lambda_*iou_sim+(1-lambda_)*det_scores
     fuse_cost = 1 - fuse_sim
     return fuse_cost

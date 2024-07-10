@@ -4,7 +4,10 @@ import os
 import os.path as osp
 import copy
 import torch
+import sys
 import torch.nn.functional as F
+
+sys.path.insert(0, '/root/ByteTrack')
 
 from .kalman_filter import KalmanFilter
 from yolox.tracker import matching
@@ -201,7 +204,7 @@ class BYTETracker(object):
                 tracked_stracks.append(track)               
         
         ''' Step 2: First association, with high score detection boxes'''
-        strack_pool = joint_stracks(tracked_stracks, self.lost_stracks)       
+        strack_pool = joint_stracks(tracked_stracks, self.lost_stracks)              
         
         # Predict the current location with KF
         STrack.multi_predict(strack_pool)
@@ -209,10 +212,16 @@ class BYTETracker(object):
         dists = matching.iou_distance(strack_pool, detections)        
         if not self.args.mot20:
             dists = matching.fuse_score(dists, detections)
-        dists = matching.gate_cost_matrix(self.kalman_filter, dists, strack_pool, detections)
+        # @heesang
+        dists, occlude_indices = matching.fuse_motion_(self.kalman_filter, dists, strack_pool, detections, self.args.match_thresh)
+        for lost in occlude_indices:
+            lost_stracks.append(strack_pool[lost])
         
         matches, u_track, u_detection = matching.linear_assignment(dists, thresh=self.args.match_thresh)
-
+        
+        # @heesang
+        u_track = np.setdiff1d(u_track, occlude_indices)
+        
         for itracked, idet in matches:
             track = strack_pool[itracked]
             det = detections[idet]
@@ -232,15 +241,17 @@ class BYTETracker(object):
                           (tlbr, s) in zip(dets_second, scores_second)]
         else:
             detections_second = []
+        
         r_tracked_stracks = [strack_pool[i] for i in u_track if strack_pool[i].state == TrackState.Tracked]
         
         dists = matching.iou_distance(r_tracked_stracks, detections_second)
-        # dists = matching.gate_cost_matrix(self.kalman_filter, dists, r_tracked_stracks, detections_second)
         
         matches, u_track, u_detection_second = matching.linear_assignment(dists, thresh=0.5)
+        second_matched_det = []
         for itracked, idet in matches:
             track = r_tracked_stracks[itracked]
             det = detections_second[idet]
+            second_matched_det.append(det)
             if track.state == TrackState.Tracked:
                 track.update(det, self.frame_id) # score 변화, is_activate True, kalman state 변경
                 activated_starcks.append(track)
@@ -256,10 +267,13 @@ class BYTETracker(object):
 
         '''Deal with unconfirmed tracks, usually tracks with only one beginning frame''' # unconfirmed는 track으로 만들어지고 나서, 아직 일정 시간 이상 match가 안된거야.
         detections = [detections[i] for i in u_detection]
+        
+        
         dists = matching.iou_distance(unconfirmed, detections)
         if not self.args.mot20:
             dists = matching.fuse_score(dists, detections)
-        dists = matching.gate_cost_matrix(self.kalman_filter, dists, unconfirmed, detections)
+        # @heesang
+        dists = matching.fuse_motion(self.kalman_filter, dists, unconfirmed, detections)
         
         matches, u_unconfirmed, u_detection = matching.linear_assignment(dists, thresh=0.7)
         for itracked, idet in matches:
@@ -327,7 +341,7 @@ def sub_stracks(tlista, tlistb):
 def remove_duplicate_stracks(stracksa, stracksb):
     pdist = matching.iou_distance(stracksa, stracksb)
     pairs = np.where(pdist < 0.15)
-    dupa, dupb = list(), list()
+    dupa, dupb = list(), list() # dupa : 
     for p, q in zip(*pairs):
         timep = stracksa[p].frame_id - stracksa[p].start_frame
         timeq = stracksb[q].frame_id - stracksb[q].start_frame
