@@ -6,6 +6,7 @@ import copy
 import torch
 import sys
 import torch.nn.functional as F
+import logging
 
 sys.path.insert(0, '/root/ByteTrack')
 
@@ -55,7 +56,7 @@ class STrack(BaseTrack):
         self.state = TrackState.Tracked
         if frame_id == 1:
             self.is_activated = True
-        # self.is_activated = True
+        
         self.frame_id = frame_id
         self.start_frame = frame_id
  
@@ -214,13 +215,13 @@ class BYTETracker(object):
             dists = matching.fuse_score(dists, detections)
         # @heesang
         dists, occlude_indices = matching.fuse_motion_(self.kalman_filter, dists, strack_pool, detections, self.args.match_thresh)
-        for lost in occlude_indices:
-            lost_stracks.append(strack_pool[lost])
+        for occlude in occlude_indices:
+            track = strack_pool[occlude]
+            track.mark_removed()
+            removed_stracks.append(track)
+        self.tracked_stracks = sub_stracks(self.tracked_stracks, removed_stracks)
         
         matches, u_track, u_detection = matching.linear_assignment(dists, thresh=self.args.match_thresh)
-        
-        # @heesang
-        u_track = np.setdiff1d(u_track, occlude_indices)
         
         for itracked, idet in matches:
             track = strack_pool[itracked]
@@ -242,8 +243,7 @@ class BYTETracker(object):
         else:
             detections_second = []
         
-        r_tracked_stracks = [strack_pool[i] for i in u_track if strack_pool[i].state == TrackState.Tracked]
-        
+        r_tracked_stracks = [strack_pool[i] for i in u_track if strack_pool[i].state == TrackState.Tracked]            
         dists = matching.iou_distance(r_tracked_stracks, detections_second)
         
         matches, u_track, u_detection_second = matching.linear_assignment(dists, thresh=0.5)
@@ -258,7 +258,7 @@ class BYTETracker(object):
             else:
                 track.re_activate(det, self.frame_id, new_id=False)
                 refind_stracks.append(track)
-
+                
         for it in u_track:
             track = r_tracked_stracks[it]
             if not track.state == TrackState.Lost:
@@ -287,8 +287,9 @@ class BYTETracker(object):
         """ Step 4: Init new stracks"""
         for inew in u_detection:
             track = detections[inew]
-            if track.score < self.det_thresh:
-                continue
+            # @heesang
+            # if track.score < self.det_thresh:
+            #     continue
             track.activate(self.kalman_filter, self.frame_id)
             activated_starcks.append(track)
         """ Step 5: Update state"""
@@ -304,11 +305,13 @@ class BYTETracker(object):
         self.tracked_stracks = joint_stracks(self.tracked_stracks, refind_stracks)
         self.lost_stracks = sub_stracks(self.lost_stracks, self.tracked_stracks)
         self.lost_stracks.extend(lost_stracks)
-        self.lost_stracks = sub_stracks(self.lost_stracks, self.removed_stracks)
+        # @heesang : switch 310, 311 line
         self.removed_stracks.extend(removed_stracks)
+        self.lost_stracks = sub_stracks(self.lost_stracks, self.removed_stracks)
         self.tracked_stracks, self.lost_stracks = remove_duplicate_stracks(self.tracked_stracks, self.lost_stracks)
         # get scores of lost tracks
         output_stracks = [track for track in self.tracked_stracks if track.is_activated]
+        # output_stracks = [track for track in self.tracked_stracks]
 
         return output_stracks
 

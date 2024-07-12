@@ -6,7 +6,10 @@ import cv2
 import torch
 import sys
 
-sys.path.insert(0, '/root/ByteTrack')
+sys.path.insert(0, '/root/ByteTrack_heesang')
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
 
 from loguru import logger
 
@@ -274,20 +277,23 @@ def imageflow_demo(predictor, vis_folder, current_time, args):
                 online_tlwhs = []
                 online_ids = []
                 online_scores = []
+                online_active = []
                 for t in online_targets:
                     tlwh = t.tlwh
                     tid = t.track_id
+                    activated = t.is_activated
                     vertical = tlwh[2] / tlwh[3] > args.aspect_ratio_thresh
                     if tlwh[2] * tlwh[3] > args.min_box_area and not vertical:
                         online_tlwhs.append(tlwh)
                         online_ids.append(tid)
                         online_scores.append(t.score)
+                        online_active.append(activated)
                         results.append(
                             f"{frame_id},{tid},{tlwh[0]:.2f},{tlwh[1]:.2f},{tlwh[2]:.2f},{tlwh[3]:.2f},{t.score:.2f},-1,-1,-1\n"
                         )
                 timer.toc()
                 online_im = plot_tracking(
-                    img_info['raw_img'], online_tlwhs, online_ids, frame_id=frame_id + 1, fps=1. / timer.average_time
+                    img_info['raw_img'], online_tlwhs, online_ids, online_active, frame_id=frame_id + 1, fps=1. / timer.average_time
                 )
             else:
                 timer.toc()

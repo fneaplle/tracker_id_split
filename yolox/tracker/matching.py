@@ -170,12 +170,11 @@ def fuse_motion_(kf, cost_matrix, tracks, detections, only_position=False, lambd
         cost_matrix[row, gating_distance > gating_threshold] = np.inf
         
     for col in range(len(gating_mask[0])):
-        mask_indices = np.where(gating_mask[:, col]<0.297)[0]
+        mask_indices = np.where(gating_mask[:, col]<0.711)[0]
         if len(mask_indices)>=2:
             # @heesang
             for i in mask_indices:
                 occlude_indices.append(i)
-            print([tracks[i].track_id for i in mask_indices])
             cost_matrix[mask_indices, col] = np.inf
     
     return cost_matrix, occlude_indices # @heesang
