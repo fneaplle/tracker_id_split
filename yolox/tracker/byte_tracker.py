@@ -229,6 +229,9 @@ class BYTETracker(object):
             if track.state == TrackState.Tracked:
                 track.update(detections[idet], self.frame_id)
                 activated_starcks.append(track)
+            # @heesang
+            elif track.state == TrackState.Removed:
+                continue
             else:
                 track.re_activate(det, self.frame_id, new_id=False)
                 refind_stracks.append(track)
