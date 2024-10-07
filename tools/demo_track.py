@@ -14,6 +14,7 @@ logging.basicConfig(level=logging.DEBUG)
 from loguru import logger
 
 from yolox.data.data_augment import preproc
+from yolox.data.data_augment import ValTransform
 from yolox.exp import get_exp
 from yolox.utils import fuse_model, get_model_info, postprocess
 from yolox.utils.visualize import plot_tracking
@@ -138,6 +139,7 @@ class Predictor(object):
         self.test_size = exp.test_size
         self.device = device
         self.fp16 = fp16
+        self.preproc = ValTransform()
         if trt_file is not None:
             from torch2trt import TRTModule
 
@@ -180,6 +182,41 @@ class Predictor(object):
             #logger.info("Infer time: {:.4f}s".format(time.time() - t0))
         return outputs, img_info
 
+    def cocoinference(self, img):
+        img_info = {"id": 0}
+        if isinstance(img, str):
+            img_info["file_name"] = os.path.basename(img)
+            img = cv2.imread(img)
+        else:
+            img_info["file_name"] = None
+
+        height, width = img.shape[:2]
+        img_info["height"] = height
+        img_info["width"] = width
+        img_info["raw_img"] = img
+
+        ratio = min(self.test_size[0] / img.shape[0], self.test_size[1] / img.shape[1])
+        img_info["ratio"] = ratio
+
+        img, _ = self.preproc(img, None, self.test_size)
+        img = torch.from_numpy(img).unsqueeze(0)
+        img = img.float()
+        if self.device != "cpu":
+            img = img.cuda()
+            if self.fp16:
+                img = img.half()  # to FP16
+
+
+        with torch.no_grad():
+            t0 = time.time()
+            outputs = self.model(img)
+            if self.decoder is not None:
+                outputs = self.decoder(outputs, dtype=outputs.type())
+            outputs = postprocess(
+                outputs, self.num_classes, self.confthre,
+                self.nmsthre
+            )
+        return outputs, img_info
 
 def image_demo(predictor, vis_folder, current_time, args):
     if osp.isdir(args.path):
@@ -256,6 +293,8 @@ def imageflow_demo(predictor, vis_folder, current_time, args):
     os.makedirs(save_folder, exist_ok=True)
     if args.demo == "video":
         save_path = osp.join(save_folder, args.path.split("/")[-1])
+        if osp.splitext(save_path)[-1] != 'mp4':
+            save_path = osp.splitext(save_path)[0]+'.mp4'
     else:
         save_path = osp.join(save_folder, "camera.mp4")
     logger.info(f"video save_path is {save_path}")
@@ -271,7 +310,12 @@ def imageflow_demo(predictor, vis_folder, current_time, args):
             logger.info('Processing frame {} ({:.2f} fps)'.format(frame_id, 1. / max(1e-5, timer.average_time)))
         ret_val, frame = cap.read()
         if ret_val:
+            # outputs, img_info = predictor.cocoinference(frame)
             outputs, img_info = predictor.inference(frame, timer)
+            
+            # outputs[0] = outputs[0][outputs[0][:, 6]==0]
+            # logger.info(f'labels : {outputs[0][:, 6]} / scores : {outputs[0][:, 4]}, {outputs[0][:, 5]}')
+            
             if outputs[0] is not None:
                 online_targets = tracker.update(outputs[0], [img_info['height'], img_info['width']], exp.test_size)
                 online_tlwhs = []
