@@ -4,6 +4,7 @@ assets/
 videos/
 datasets/
 .vscode/
+bash
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
